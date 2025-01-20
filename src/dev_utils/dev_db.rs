@@ -58,12 +58,10 @@ pub async fn init_dev_db() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
 #[tracing::instrument]
 async fn pexec(db: &Db, file: &str) -> Result<(), sqlx::Error> {
     println!("{:<12} - pexec: {file:?}", "FOR-DEV-ONLY");
 
-    // -- Read the file.
     let content = fs::read_to_string(file)?;
     
     let sqls: Vec<&str> = content.split(';').collect();

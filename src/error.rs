@@ -8,6 +8,10 @@ use std::fmt;
 
 use sqlx::Error as SqlxError;
 use crate::{crypt, web};
+
+use swiftide::integrations::qdrant::VectorConfigBuilderError;
+use swiftide::integrations::ollama::OllamaBuilderError;
+use swiftide::integrations::redis::RedisBuilderError;
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Clone, Debug, Serialize, AsRefStr)]
@@ -22,6 +26,7 @@ pub enum Error {
     TicketUpdateFailIdNotFound { id: u64 },
 
     DocumentUploadFail,
+    DocumentUploadFailOllama,
 
     ServiceError(String),
     FailToCreatePool(String),
@@ -31,6 +36,7 @@ pub enum Error {
     SwiftideError(String),
     QdrantError(String),
     OllamaError(String),
+    RedisError(String),
 
     EntityNotFound { entity: &'static str, id: i64 },
 
@@ -52,11 +58,31 @@ pub enum Error {
     TokenExpirationNotIso,
     TokenExpired,
 
+    QueryError(String),
+
 }
 
 impl From<SqlxError> for Error {
     fn from(e: SqlxError) -> Self {
         Self::SqlxError(e.to_string())
+    }
+}
+
+impl From<VectorConfigBuilderError> for Error {
+    fn from(err: VectorConfigBuilderError) -> Self {
+        Error::QdrantError(err.to_string())
+    }
+}
+
+impl From<OllamaBuilderError> for Error {
+    fn from(err: OllamaBuilderError) -> Self {
+        Error::OllamaError(err.to_string())
+    }
+}
+
+impl From<RedisBuilderError> for Error {
+    fn from(err: RedisBuilderError) -> Self {
+        Error::RedisError(err.to_string())
     }
 }
 
@@ -109,6 +135,11 @@ impl Error {
 
             Self::DocumentUploadFail => {
                 error!("Error in document upload: {:?}", self);
+                (StatusCode::BAD_REQUEST, ClientError::INVALID_PARAMS)
+            }
+
+            Self::DocumentUploadFailOllama => {
+                error!("Error in document upload Ollama: {:?}", self);
                 (StatusCode::BAD_REQUEST, ClientError::INVALID_PARAMS)
             }
 
@@ -215,6 +246,11 @@ impl Error {
             Self::TokenExpired => {
                 error!("Token expired: {:?}", self);
                 (StatusCode::INTERNAL_SERVER_ERROR, ClientError::TOKEN_ERROR)
+            }
+
+            Self::QueryError(_) => {
+                error!("Query error: {:?}", self);
+                (StatusCode::INTERNAL_SERVER_ERROR, ClientError::DATABASE_ERROR)
             }
 
 

@@ -1,8 +1,9 @@
 
 use axum::{
     extract::State,
-    Json, Router,
+    Json,
     routing::post,
+    Router,
 };
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -13,7 +14,6 @@ use crate::model::manager::ModelManager;
 #[derive(Debug, Deserialize)]
 pub struct FineTuneRequest {
     pub prompt: String,
-    pub context: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -21,23 +21,20 @@ pub struct FineTuneResponse {
     pub response: String,
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip_all, name = "fine_tune_handler")]
 pub async fn fine_tune_handler(
     State(mm): State<ModelManager>,
     _ctx: Ctx,
     Json(payload): Json<FineTuneRequest>,
 ) -> Result<Json<FineTuneResponse>> {
-    println!("->> fine_tune_handler - prompt: {:?}", payload.prompt);
+    info!("Received fine-tune request: {:?}", payload.prompt);
 
-    let refined_prompt = mm.fine_tune_prompt(&payload.prompt, &payload.context).await?;
+    let refined_answer = mm.fine_tune_prompt(&payload.prompt).await?;
 
-    let ollama_response = mm.ollama_client.get_response(&refined_prompt).await?;
-
-    info!("Ollama final LLM response: {}", ollama_response);
-
+    info!("Refined answer: {:?}", refined_answer);
 
     Ok(Json(FineTuneResponse {
-        response: ollama_response,
+        response: refined_answer,
     }))
 }
 

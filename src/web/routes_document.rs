@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     routing::{delete, get, post, put},
 };
-use futures_util::StreamExt;
+use futures_util::{StreamExt, TryFutureExt};
 use sanitize_filename::sanitize;
 use serde::Deserialize;
 use std::fs;
@@ -32,7 +32,8 @@ pub async fn upload_documents(
 ) -> Result<Json<Vec<Document>>> {
     println!("->> {:<12} - upload_documents (chunk-based)", "HANDLER");
 
-    fs::create_dir_all("/usr/local/bin/uploads")
+    tokio::fs::create_dir_all("/usr/local/bin/uploads")
+        .await
         .map_err(|_| Error::DocumentUploadFail)?;
 
     let mut uploaded_docs = Vec::new();
@@ -57,7 +58,7 @@ pub async fn upload_documents(
 
         info!("Processing file: {original_filename}, type: {content_type}");
 
-        let allowed_types = ["application/pdf", "text/plain"];
+        let allowed_types = ["application/pdf", "text/plain", "text/markdown"];
         if !allowed_types.contains(&content_type.as_str()) {
             return Err(Error::ServiceError(format!(
                 "Unsupported Content-Type: {content_type}"

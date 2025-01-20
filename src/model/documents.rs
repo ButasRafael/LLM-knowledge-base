@@ -10,6 +10,10 @@ use tracing::instrument;
 use tokio::fs::read_to_string;
 use pdf_extract::extract_text;
 use tokio::task::spawn_blocking;
+use num_cpus;
+
+use swiftide::indexing::{EmbedMode, Node, Pipeline};
+use swiftide::indexing::transformers::{ChunkMarkdown, ChunkText, Embed, MetadataKeywords, MetadataQAText, MetadataSummary, MetadataTitle};
 
 #[derive(Debug, Clone, Fields, FromRow, Serialize, Deserialize)]
 pub struct Document {
@@ -115,22 +119,62 @@ impl DocumentBmc {
         mm: &ModelManager,
         doc_internal: DocumentForCreateInternal,
     ) -> Result<Document> {
-        // Step 1: Upload the document as usual.
+
         let document = Self::upload_document(ctx, mm, doc_internal.filename.clone(), doc_internal.filepath.clone()).await?;
         let document_id = document.id;
-        let document_content: String;
-        if doc_internal.filepath.ends_with(".pdf") {
-            document_content = Self::parse_pdf_blocking(doc_internal.filepath.clone()).await?;
+
+        let text = if doc_internal.filepath.ends_with(".pdf") {
+            Self::parse_pdf_blocking(doc_internal.filepath.clone()).await?
         } else {
-            document_content = read_to_string(&doc_internal.filepath)
+                read_to_string(&doc_internal.filepath)
                 .await
-                .map_err(|_| Error::DocumentUploadFail)?;
-        }
+                .map_err(|_| Error::DocumentUploadFail)?
+        };
 
-
-        let embedding = mm.swiftide_client.create_embedding(&document_content).await?;
-
-        mm.qdrant_client.store_embedding(document_id, embedding).await?;
+        let node = Node::builder()
+            .original_size(text.len())
+            .chunk(text)
+            .metadata([("doc_id", document_id.to_string())])
+            .path(doc_internal.filepath.clone())
+            .metadata([("doc_name", doc_internal.filename.clone())])
+            .metadata([("doc_uploaded_by", doc_internal.uploaded_by.to_string())])
+            .build()
+            .map_err(|e| Error::SwiftideError(e.to_string()))?;
+        let pipeline = match Path::new(&doc_internal.filepath).extension().and_then(|ext| ext.to_str()) {
+            Some("md") => {
+                Pipeline::from_stream(vec![Ok(node)])
+                    .with_concurrency(num_cpus::get() * 2)
+                    .with_embed_mode(EmbedMode::Both)
+                    .then_chunk(ChunkMarkdown::from_chunk_range(10..2048))
+                    .then(MetadataQAText::new(mm.ollama.clone()))
+                    .then(MetadataSummary::new(mm.ollama.clone()))
+                    .then(MetadataTitle::new(mm.ollama.clone()))
+                    .then(MetadataKeywords::new(mm.ollama.clone()))
+                    .then_in_batch(Embed::new(mm.ollama.clone()).with_batch_size(10))
+            },
+            Some("txt") | Some("pdf") => {
+                Pipeline::from_stream(vec![Ok(node)])
+                    .with_concurrency(50)
+                    .with_embed_mode(EmbedMode::Both)
+                    .then_chunk(ChunkText::from_chunk_range(10..2048))
+                    .then(MetadataQAText::new(mm.ollama.clone()))
+                    .then(MetadataSummary::new(mm.ollama.clone()))
+                    .then(MetadataTitle::new(mm.ollama.clone()))
+                    .then(MetadataKeywords::new(mm.ollama.clone()))
+                    .then_in_batch(Embed::new(mm.ollama.clone()).with_batch_size(10))
+            },
+            _ => {
+                return Err(Error::ServiceError("Unsupported file extension".to_string()));
+            }
+        };
+        pipeline
+            .log_all()
+                //.filter_errors()
+                .filter_cached(mm.redis_cache.clone())
+                .then_store_with(mm.qdrant.clone())
+                .run()
+                .await
+                .map_err(|e| Error::DocumentUploadFailOllama)?;
 
         Ok(document)
     }

@@ -257,14 +257,33 @@ async fn quick_dev() -> Result<()> {
         info!("Created test_files directory at {}", test_files_dir);
     }
 
-    // A small variety of test documents
     let test_files: Vec<(&str, &str, &[u8])> = vec![
-        ("test_document.txt", "text/plain", b"This is a test text document."),
+        ("sample_document.md", "text/markdown", b"
+# Introduction to Rust
+
+Rust is a systems programming language focused on safety, speed, and concurrency. Developed by Mozilla, Rust ensures memory safety without a garbage collector by using a unique ownership model. This model eliminates common bugs found in other languages, such as null pointer dereferencing and buffer overflows.
+
+## Key Features
+
+- **Ownership System:** Guarantees memory safety through compile-time checks.
+- **Concurrency:** Provides fearless concurrency with threads and async programming.
+- **Performance:** Comparable to C and C++ due to zero-cost abstractions.
+- **Tooling:** Comes with Cargo, Rust's package manager and build system, and extensive documentation support.
+        "),
+        ("sample_document.txt", "text/plain", b"Machine Learning Fundamentals
+
+Machine Learning (ML) is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. ML algorithms build models based on sample data, known as training data, to make predictions or decisions.
+
+Key Concepts:
+- Supervised vs Unsupervised Learning
+- Overfitting and Underfitting
+- Feature Engineering
+- Evaluation Metrics
+        "),
         (
-            "test_document.pdf",
+            "sample_document.pdf",
             "application/pdf",
-            // Make sure `tests/test_files/test_document.pdf` exists or is embedded
-            include_bytes!("test_files/test_document.pdf") as &[u8],
+            include_bytes!("test_files/sample_document.pdf") as &[u8],
         ),
     ];
 
@@ -331,14 +350,15 @@ async fn quick_dev() -> Result<()> {
             let res = admin_client
                 .put(&format!("http://localhost:8000/api/documents/{}", document_id))
                 .json(&json!({
-                    "filename": "updated_test_document.txt",
-                    "filepath": "/new/path/updated_test_document.txt"
+                    "filename": format!("updated_{}", filename),
+                    "filepath": format!("/new/path/updated_{}", filename)
                 }))
                 .send()
                 .await?;
             print_response(res, &format!("PUT /api/documents/{}", document_id)).await?;
 
-            // Delete
+            // Optionally, you can test deletion here or after all tests
+            // For demonstration, we'll delete the document immediately
             info!("Deleting document via DELETE /api/documents/{}", document_id);
             let res = admin_client
                 .delete(&format!("http://localhost:8000/api/documents/{}", document_id))
@@ -360,18 +380,41 @@ async fn quick_dev() -> Result<()> {
     //----------------------------------
     info!("Testing multiple-file upload in a single request");
 
-    let multi_txt_path = format!("{}/multi1.txt", test_files_dir);
-    let multi_pdf_path = format!("{}/multi2.pdf", test_files_dir);
+    let multi_md_path = format!("{}/multi1.md", test_files_dir);
+    let multi_txt_path = format!("{}/multi2.txt", test_files_dir);
+    let multi_pdf_path = format!("{}/multi3.pdf", test_files_dir);
 
     // Write the multi test files if they don't exist
+    if !Path::new(&multi_md_path).exists() {
+        tokio::fs::write(&multi_md_path, b"
+# Multi-file Markdown Document
+
+This is a multi-file markdown content. It includes various sections and formatting to test the ChunkMarkdown transformer.
+
+## Section 1
+
+Content for section 1.
+
+## Section 2
+
+Content for section 2.
+
+        ").await?;
+    }
     if !Path::new(&multi_txt_path).exists() {
-        tokio::fs::write(&multi_txt_path, b"Multi-file text content").await?;
+        tokio::fs::write(&multi_txt_path, b"Multi-file plain text content. This is used to test the ChunkText transformer for plain text files.").await?;
     }
     if !Path::new(&multi_pdf_path).exists() {
-        tokio::fs::write(&multi_pdf_path, include_bytes!("test_files/test_document.pdf")).await?;
+        // Ensure that 'test_files/sample_document.pdf' exists or use a placeholder
+        // Here, we assume that 'sample_document.pdf' has already been created
+        tokio::fs::copy("tests/test_files/sample_document.pdf", &multi_pdf_path).await?;
     }
 
     // Load them into memory
+    let mut file_md = File::open(&multi_md_path).await?;
+    let mut buffer_md = Vec::new();
+    file_md.read_to_end(&mut buffer_md).await?;
+
     let mut file_txt = File::open(&multi_txt_path).await?;
     let mut buffer_txt = Vec::new();
     file_txt.read_to_end(&mut buffer_txt).await?;
@@ -380,18 +423,24 @@ async fn quick_dev() -> Result<()> {
     let mut buffer_pdf = Vec::new();
     file_pdf.read_to_end(&mut buffer_pdf).await?;
 
-    // Build a single multipart form with TWO files
+    // Build a single multipart form with THREE files (.md, .txt, .pdf)
     let multiple_form = multipart::Form::new()
         .part(
             "file",
+            multipart::Part::bytes(buffer_md)
+                .file_name("multi1.md")
+                .mime_str("text/markdown")?,
+        )
+        .part(
+            "file",
             multipart::Part::bytes(buffer_txt)
-                .file_name("multi1.txt")
+                .file_name("multi2.txt")
                 .mime_str("text/plain")?,
         )
         .part(
             "file",
             multipart::Part::bytes(buffer_pdf)
-                .file_name("multi2.pdf")
+                .file_name("multi3.pdf")
                 .mime_str("application/pdf")?,
         );
 
@@ -415,7 +464,7 @@ async fn quick_dev() -> Result<()> {
                 error!("No valid doc_id returned for item index {}", idx);
                 continue;
             }
-            // Just do a simple check or retrieval
+            // Retrieve
             info!("Retrieving /api/documents/{}", doc_id);
             let res = admin_client
                 .get(&format!("http://localhost:8000/api/documents/{}", doc_id))
@@ -423,7 +472,7 @@ async fn quick_dev() -> Result<()> {
                 .await?;
             print_response(res, &format!("GET /api/documents/{}", doc_id)).await?;
 
-            // Demonstrate delete to clean up
+            // Optionally, demonstrate deletion to clean up
             info!("Deleting doc_id={}", doc_id);
             let res = admin_client
                 .delete(&format!("http://localhost:8000/api/documents/{}", doc_id))
@@ -441,37 +490,55 @@ async fn quick_dev() -> Result<()> {
         .await?;
     print_response(res, "GET /api/documents").await?;
 
-    info!("Sending POST /api/query/data");
-    let res = admin_client
-        .post("http://localhost:8000/api/query/data")
-        .json(&json!({
-            "prompt": "Any info about finances?"
-        }))
-        .send()
-        .await?;
-    let query_data_response: Value = print_response(res, "POST /api/query/data").await?;
-    info!("Query data response: {:#?}", query_data_response);
+    //----------------------------------
+    // 7) RAG Query Tests
+    //----------------------------------
+    // Define sample queries based on the uploaded documents
+    let sample_queries = vec![
+        // Queries based on Markdown content
+        "What are the key features of Rust?",
+        "Explain the ownership system in Rust.",
+        // Queries based on Text content
+        "Describe the differences between supervised and unsupervised learning.",
+        "What are the key concepts in machine learning?",
+        // Queries based on PDF content
+        "How does the HTTP protocol facilitate client-server communication?",
+        "What are the main components of the HTTP protocol?",
+    ];
+
+    for query in sample_queries.iter() {
+        info!("Sending POST /api/query/data with prompt: '{}'", query);
+        let res = admin_client
+            .post("http://localhost:8000/api/query/data")
+            .json(&json!({
+                "prompt": query
+            }))
+            .send()
+            .await?;
+        let query_data_response: Value = print_response(res, &format!("POST /api/query/data ('{}')", query)).await?;
+
+        info!("Query data response: {:#?}", query_data_response);
+    }
 
     //----------------------------------
-    // 7) Test "fine-tune"
+    // 8) Fine-Tune Tests
     //----------------------------------
-    info!("Sending POST /api/fine-tune");
-    let res = admin_client
-        .post("http://localhost:8000/api/fine-tune")
-        .json(&json!({
-            "prompt": "How to handle finances?",
-            "context": [
-                "Document snippet #1 about finances",
-                "Document snippet #2 about budgeting"
-            ]
-        }))
-        .send()
-        .await?;
-    let fine_tune_response: Value = print_response(res, "POST /api/fine-tune").await?;
-    info!("Fine-tune response: {:#?}", fine_tune_response);
 
+    for prompt in sample_queries.iter() {
+        info!("Sending POST /api/fine-tune with prompt: '{}'", prompt);
+        let res = admin_client
+            .post("http://localhost:8000/api/fine-tune")
+            .json(&json!({
+                "prompt": prompt,
+            }))
+            .send()
+            .await?;
+        let fine_tune_response: Value = print_response(res, &format!("POST /api/fine-tune ('{}')", prompt)).await?;
+
+        info!("Fine-tune response: {:#?}", fine_tune_response);
+    }
     //--------------------------------------------
-    // 8) Test user "me" endpoint & password update
+    // 9) Test user "me" endpoint & password update
     //--------------------------------------------
 
     // a) Build a fresh client for user1
@@ -564,7 +631,7 @@ async fn quick_dev() -> Result<()> {
     print_response(res, "GET /admin/statistics (User 1 NOT admin)").await?;
 
     // i) Log off User 1
-    info!("Logging off admin user");
+    info!("Logging off User 1");
     let res = admin_client
         .post("http://localhost:8000/api/logoff")
         .json(&json!({ "logoff": true }))
@@ -576,7 +643,7 @@ async fn quick_dev() -> Result<()> {
         info!("Admin successfully logged off.");
     } else {
         error!("Admin logoff failed.");
-        return Err(anyhow::anyhow!("Admin logoff failed"));
+        return Err(anyhow::anyhow!("Admin logoff failed."));
     }
 
     // j) Attempt to access a protected route after logoff to ensure cookies are cleared
@@ -594,8 +661,8 @@ async fn quick_dev() -> Result<()> {
         info!("Protected route access correctly denied after logoff.");
     }
 
-    // c) Logoff user1_client_new
-    info!("Logging off User 1");
+    // k) Logoff user1_client_new
+    info!("Logging off User 1 (new client)");
     let res = user1_client_new
         .post("http://localhost:8000/api/logoff")
         .json(&json!({ "logoff": true }))
@@ -607,10 +674,10 @@ async fn quick_dev() -> Result<()> {
         info!("User 1 successfully logged off.");
     } else {
         error!("User 1 logoff failed.");
-        return Err(anyhow::anyhow!("User 1 logoff failed"));
+        return Err(anyhow::anyhow!("User 1 logoff failed."));
     }
 
-    // d) Attempt to access the 'me' endpoint after logoff to ensure cookies are cleared
+    // l) Attempt to access the 'me' endpoint after logoff to ensure cookies are cleared
     info!("Attempting to access /api/users/me after User 1 logoff");
     let res = user1_client_new
         .get("http://localhost:8000/api/users/me")
@@ -624,6 +691,10 @@ async fn quick_dev() -> Result<()> {
     } else {
         info!("'me' endpoint access correctly denied after logoff.");
     }
+
+    //----------------------------------
+    // 9) Admin Re-login and Additional User Creation
+    //----------------------------------
 
     info!("Sending POST /api/login (admin)");
     let res = admin_client
@@ -640,19 +711,19 @@ async fn quick_dev() -> Result<()> {
         error!("Admin login failed");
         return Err(anyhow::anyhow!("Admin login failed"));
     }
-    let admin_id = login_response["result"]["user_id"]
+    let admin_id_new = login_response["result"]["user_id"]
         .as_i64()
         .ok_or_else(|| anyhow::anyhow!("Admin ID not found"))?;
-    info!("Logged in as admin with ID: {}", admin_id);
+    info!("Logged in as admin with ID: {}", admin_id_new);
 
     info!("Sending POST /api/users (User 3 with role=admin)");
     let res = admin_client
         .post("http://localhost:8000/api/users")
         .json(&json!({
-        "username": "User 3",
-        "pwd_clear": "welcome3",
-        "role": "admin"
-    }))
+            "username": "User 3",
+            "pwd_clear": "welcome3",
+            "role": "admin"
+        }))
         .send()
         .await?;
     let user3: Value = print_response(res, "POST /api/users (User 3, admin)").await?;
@@ -681,9 +752,9 @@ async fn quick_dev() -> Result<()> {
     let res = user3_client
         .post("http://localhost:8000/api/login")
         .json(&json!({
-        "username": "User 3",
-        "password": "welcome3"
-    }))
+            "username": "User 3",
+            "password": "welcome3"
+        }))
         .send()
         .await?;
     let user3_login: Value = print_response(res, "POST /api/login (User 3, admin role)").await?;
@@ -708,6 +779,9 @@ async fn quick_dev() -> Result<()> {
         .await?;
     print_response(res, "GET /admin/statistics (User 3 admin)").await?;
 
+    //----------------------------------
+    // 10) Final Cleanup and Confirmation
+    //----------------------------------
     info!("=== ALL QUICK_DEV TESTS COMPLETED SUCCESSFULLY ===");
     Ok(())
 }
