@@ -1,0 +1,1 @@
+Multi-file plain text content. This is used to test the ChunkText transformer for plain text files.

@@ -1,0 +1,1 @@
+INSERT INTO "user" (id, username, role) VALUES (1, 'admin', 'admin');
