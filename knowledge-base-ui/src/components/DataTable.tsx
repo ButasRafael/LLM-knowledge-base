@@ -1,4 +1,4 @@
-// src/components/DataTable.tsx
+
 import {
     Table,
     TableBody,

@@ -1,14 +1,3 @@
-// src/lib/api.ts
-/**
- * A minimal wrapper around `fetch` that
- *   • automatically hits the Rust backend (BASE)
- *   • always sends/receives JSON
- *   • keeps cookies (so Axum sees your session)
- *
- *  ➜  The only difference from the previous version is the custom
- *      `JsonInit` type, which lets you pass a plain object as `body`
- *      without fighting TypeScript.
- */
 
 export const BASE =
     process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000'

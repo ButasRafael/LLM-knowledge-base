@@ -14,7 +14,7 @@ import {
     Avatar,
     AvatarFallback,
     AvatarImage,
-} from '@/components/ui/avatar'       // ← shadcn avatar
+} from '@/components/ui/avatar'
 import { LogOut, Moon, Sun } from 'lucide-react'
 import { api } from '@/lib/api'
 import { Ctx } from '@/lib/auth'
