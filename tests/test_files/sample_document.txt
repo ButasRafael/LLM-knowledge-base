@@ -1,9 +1,0 @@
-Machine Learning Fundamentals
-
-Machine Learning (ML) is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. ML algorithms build models based on sample data, known as training data, to make predictions or decisions.
-
-Key Concepts:
-- Supervised vs Unsupervised Learning
-- Overfitting and Underfitting
-- Feature Engineering
-- Evaluation Metrics
